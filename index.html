@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>段码屏 PLC 控制</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    color: #e0e0e0;
+  }
+
+  h1 {
+    font-size: 1.6rem;
+    margin-bottom: 8px;
+    background: linear-gradient(90deg, #00d2ff, #3a7bd5);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-align: center;
+  }
+
+  .subtitle {
+    font-size: 0.85rem;
+    color: #8899aa;
+    margin-bottom: 30px;
+    text-align: center;
+  }
+
+  /* ===== 段码屏容器 ===== */
+  .display-wrapper {
+    background: #0a0a14;
+    border-radius: 16px;
+    padding: 40px 30px 30px;
+    box-shadow:
+      0 0 0 2px #1a2a4a,
+      0 0 60px rgba(0, 150, 255, 0.08),
+      inset 0 0 30px rgba(0, 0, 0, 0.5);
+    margin-bottom: 30px;
+    position: relative;
+  }
+
+  .display-wrapper::before {
+    content: '7-SEGMENT DISPLAY';
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.6rem;
+    letter-spacing: 3px;
+    color: #33445a;
+  }
+
+  .segment-display {
+    position: relative;
+    width: 160px;
+    height: 280px;
+    margin: 0 auto;
+  }
+
+  /* ===== 每段通用样式 ===== */
+  .segment {
+    position: absolute;
+    background: #111827;
+    transition: all 0.15s ease;
+    border-radius: 3px;
+  }
+
+  .segment.on {
+    background: #00e5ff;
+    box-shadow:
+      0 0 15px #00e5ff,
+      0 0 30px rgba(0, 229, 255, 0.5),
+      0 0 50px rgba(0, 229, 255, 0.3),
+      inset 0 0 10px rgba(255,255,255,0.3);
+  }
+
+  /* ===== 横段 (a, d, g) ===== */
+  .seg-h {
+    width: 100px;
+    height: 18px;
+    left: 30px;
+  }
+  .seg-h::before, .seg-h::after {
+    content: '';
+    position: absolute;
+    width: 0; height: 0;
+    top: 0;
+  }
+  .seg-h::before {
+    left: -10px;
+    border-right: 10px solid;
+    border-top: 9px solid transparent;
+    border-bottom: 9px solid transparent;
+  }
+  .seg-h::after {
+    right: -10px;
+    border-left: 10px solid;
+    border-top: 9px solid transparent;
+    border-bottom: 9px solid transparent;
+  }
+
+  /* a 段 - 顶部 */
+  .seg-a {
+    top: 10px;
+  }
+  .seg-a::before, .seg-a::after { border-right-color: inherit; border-left-color: inherit; }
+
+  /* g 段 - 中间 */
+  .seg-g {
+    top: 131px;
+  }
+
+  /* d 段 - 底部 */
+  .seg-d {
+    bottom: 10px;
+  }
+
+  /* ===== 竖段 (b, c, e, f) ===== */
+  .seg-v {
+    width: 18px;
+    height: 95px;
+  }
+  .seg-v::before, .seg-v::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    width: 0; height: 0;
+  }
+  .seg-v::before {
+    top: -10px;
+    border-bottom: 10px solid;
+    border-left: 9px solid transparent;
+    border-right: 9px solid transparent;
+  }
+  .seg-v::after {
+    bottom: -10px;
+    border-top: 10px solid;
+    border-left: 9px solid transparent;
+    border-right: 9px solid transparent;
+  }
+
+  /* b 段 - 右上 */
+  .seg-b {
+    top: 28px;
+    right: 10px;
+  }
+
+  /* c 段 - 右下 */
+  .seg-c {
+    top: 149px;
+    right: 10px;
+  }
+
+  /* e 段 - 左下 */
+  .seg-e {
+    top: 149px;
+    left: 10px;
+  }
+
+  /* f 段 - 左上 */
+  .seg-f {
+    top: 28px;
+    left: 10px;
+  }
+
+  /* ===== 小数点 dp ===== */
+  .seg-dp {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    bottom: 10px;
+    right: 10px;
+  }
+
+  /* 为 off 状态的斜边设置颜色 */
+  .segment { border-color: #111827; }
+  .seg-h { border-color: #111827; }
+
+  /* ===== PLC 状态面板 ===== */
+  .plc-panel {
+    background: #0d1117;
+    border: 1px solid #1c2738;
+    border-radius: 12px;
+    padding: 20px;
+    width: 100%;
+    max-width: 400px;
+    margin-bottom: 24px;
+  }
+
+  .plc-panel h3 {
+    font-size: 0.8rem;
+    color: #5a7a9a;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 16px;
+    text-align: center;
+  }
+
+  .io-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .io-label {
+    font-size: 0.7rem;
+    color: #4a5a6a;
+    text-align: center;
+    margin-bottom: 4px;
+  }
+
+  .io-led {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    margin: 0 auto;
+    background: #1a1a2e;
+    border: 2px solid #222;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.6rem;
+    color: #334;
+    font-weight: bold;
+    transition: all 0.15s;
+  }
+
+  .io-led.active {
+    background: #00e5ff;
+    border-color: #00e5ff;
+    color: #003344;
+    box-shadow: 0 0 10px rgba(0, 229, 255, 0.5);
+  }
+
+  /* ===== 输入区域 ===== */
+  .input-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+    max-width: 400px;
+  }
+
+  .num-input {
+    width: 120px;
+    height: 60px;
+    font-size: 2rem;
+    text-align: center;
+    background: #0d1117;
+    border: 2px solid #1c2738;
+    border-radius: 12px;
+    color: #00e5ff;
+    outline: none;
+    font-weight: bold;
+    transition: border-color 0.2s;
+  }
+
+  .num-input:focus {
+    border-color: #00e5ff;
+    box-shadow: 0 0 15px rgba(0, 229, 255, 0.2);
+  }
+
+  .btn-group {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .btn {
+    padding: 10px 24px;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-display {
+    background: linear-gradient(135deg, #00d2ff, #3a7bd5);
+    color: #fff;
+  }
+
+  .btn-display:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(0, 150, 255, 0.4);
+  }
+
+  .btn-clear {
+    background: #1a2332;
+    color: #667;
+    border: 1px solid #2a3344;
+  }
+
+  .btn-clear:hover {
+    background: #252f42;
+    color: #99a;
+  }
+
+  /* ===== 段码真值表 ===== */
+  .truth-table {
+    margin-top: 30px;
+    background: #0d1117;
+    border: 1px solid #1c2738;
+    border-radius: 12px;
+    padding: 20px;
+    width: 100%;
+    max-width: 500px;
+  }
+
+  .truth-table h3 {
+    font-size: 0.8rem;
+    color: #5a7a9a;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 16px;
+    text-align: center;
+  }
+
+  .tt-grid {
+    display: grid;
+    grid-template-columns: repeat(10, 1fr);
+    gap: 4px;
+    font-size: 0.65rem;
+  }
+
+  .tt-header {
+    text-align: center;
+    color: #5a7a9a;
+    font-weight: bold;
+    padding: 4px 0;
+    border-bottom: 1px solid #1c2738;
+  }
+
+  .tt-row-label {
+    color: #4a5a6a;
+    font-weight: bold;
+    text-align: center;
+    padding: 4px 0;
+  }
+
+  .tt-cell {
+    text-align: center;
+    padding: 4px 0;
+    color: #33445a;
+    font-family: 'Courier New', monospace;
+  }
+
+  .tt-cell.on {
+    color: #00e5ff;
+    text-shadow: 0 0 5px rgba(0, 229, 255, 0.5);
+  }
+
+  /* ===== 循环控制区 ===== */
+  .loop-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    max-width: 400px;
+    margin-bottom: 24px;
+  }
+
+  .loop-section-title {
+    font-size: 0.8rem;
+    color: #5a7a9a;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    text-align: center;
+  }
+
+  .loop-btn-group {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .btn-loop {
+    padding: 10px 18px;
+    border: 1px solid #1c2738;
+    border-radius: 8px;
+    background: #0d1117;
+    color: #8ab4d8;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-loop:hover {
+    border-color: #00e5ff;
+    color: #00e5ff;
+    box-shadow: 0 0 10px rgba(0, 229, 255, 0.15);
+  }
+
+  .btn-loop.active {
+    background: linear-gradient(135deg, #00d2ff22, #3a7bd522);
+    border-color: #00e5ff;
+    color: #00e5ff;
+    box-shadow: 0 0 12px rgba(0, 229, 255, 0.25);
+  }
+
+  .loop-speed {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.75rem;
+    color: #5a7a9a;
+  }
+
+  .loop-speed input[type="range"] {
+    width: 120px;
+    accent-color: #00e5ff;
+    cursor: pointer;
+  }
+
+  .loop-speed-val {
+    color: #00e5ff;
+    font-weight: bold;
+    min-width: 40px;
+    text-align: center;
+  }
+
+  /* ===== 数字键盘 ===== */
+  .numpad {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+    width: 100%;
+    max-width: 400px;
+    margin-bottom: 24px;
+  }
+
+  .numpad button {
+    padding: 12px 0;
+    border: 1px solid #1c2738;
+    border-radius: 8px;
+    background: #0d1117;
+    color: #8ab4d8;
+    font-size: 1rem;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .numpad button:hover {
+    background: #162033;
+    border-color: #00e5ff;
+    color: #00e5ff;
+  }
+
+  .numpad button.active-num {
+    background: linear-gradient(135deg, #00d2ff22, #3a7bd522);
+    border-color: #00e5ff;
+    color: #00e5ff;
+    box-shadow: 0 0 10px rgba(0, 229, 255, 0.2);
+  }
+
+  .footer {
+    margin-top: 30px;
+    font-size: 0.7rem;
+    color: #33445a;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<h1>🔧 段码屏 PLC 控制系统</h1>
+<p class="subtitle">输入 0~9 任意数字，自动点亮对应段码，显示该数字</p>
+
+<!-- 段码屏显示 -->
+<div class="display-wrapper">
+  <div class="segment-display">
+    <div class="segment seg-h seg-a" id="seg-a"></div>
+    <div class="segment seg-v seg-b" id="seg-b"></div>
+    <div class="segment seg-v seg-c" id="seg-c"></div>
+    <div class="segment seg-h seg-d" id="seg-d"></div>
+    <div class="segment seg-v seg-e" id="seg-e"></div>
+    <div class="segment seg-v seg-f" id="seg-f"></div>
+    <div class="segment seg-h seg-g" id="seg-g"></div>
+    <div class="segment seg-dp" id="seg-dp"></div>
+  </div>
+</div>
+
+<!-- PLC I/O 状态指示 -->
+<div class="plc-panel">
+  <h3>⚡ PLC 输出状态 (Y0~Y7)</h3>
+  <div class="io-grid" id="ioGrid">
+    <!-- JS 动态生成 -->
+  </div>
+</div>
+
+<!-- 循环控制区 -->
+<div class="loop-section">
+  <div class="loop-section-title">🔄 循环点亮模式</div>
+  <div class="loop-btn-group">
+    <button class="btn-loop" id="loopSegBtn" onclick="toggleSegScan()">📐 段码扫描</button>
+    <button class="btn-loop" id="loopNumBtn" onclick="toggleNumCycle()">🔢 数字轮播</button>
+    <button class="btn-loop" id="loopFlowBtn" onclick="toggleFlowLight()">💡 流水灯</button>
+  </div>
+  <div class="loop-speed">
+    <span>速度</span>
+    <input type="range" id="speedRange" min="1" max="10" value="5" oninput="updateSpeed()">
+    <span class="loop-speed-val" id="speedVal">5</span>
+  </div>
+</div>
+
+<!-- 数字键盘 -->
+<div class="numpad" id="numpad">
+  <!-- JS 动态生成 -->
+</div>
+
+<!-- 手动输入 -->
+<div class="input-section">
+  <input type="number" class="num-input" id="numInput" min="0" max="9" placeholder="0~9" value="0">
+  <div class="btn-group">
+    <button class="btn btn-display" onclick="stopLoop(); displayNumber();">🚀 显示</button>
+    <button class="btn btn-clear" onclick="stopLoop(); clearDisplay();">🧹 清除</button>
+  </div>
+</div>
+
+<!-- 段码真值表 -->
+<div class="truth-table">
+  <h3>📋 段码真值表</h3>
+  <div class="tt-grid" id="truthTable"></div>
+</div>
+
+<p class="footer">PLC 段码屏控制模拟器 | Segment Display PLC Controller</p>
+
+<script>
+// ===== 数字 → 段码映射（共阴极，1=亮，0=灭）=====
+// 段序: a, b, c, d, e, f, g, dp
+const SEGMENT_MAP = {
+  0: [1, 1, 1, 1, 1, 1, 0, 0],
+  1: [0, 1, 1, 0, 0, 0, 0, 0],
+  2: [1, 1, 0, 1, 1, 0, 1, 0],
+  3: [1, 1, 1, 1, 0, 0, 1, 0],
+  4: [0, 1, 1, 0, 0, 1, 1, 0],
+  5: [1, 0, 1, 1, 0, 1, 1, 0],
+  6: [1, 0, 1, 1, 1, 1, 1, 0],
+  7: [1, 1, 1, 0, 0, 0, 0, 0],
+  8: [1, 1, 1, 1, 1, 1, 1, 0],
+  9: [1, 1, 1, 1, 0, 1, 1, 0]
+};
+
+const SEGMENT_NAMES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'dp'];
+const PLC_OUTPUTS  = ['Y0', 'Y1', 'Y2', 'Y3', 'Y4', 'Y5', 'Y6', 'Y7'];
+
+// ===== 初始化 PLC I/O 面板 =====
+function initIOPanel() {
+  const grid = document.getElementById('ioGrid');
+  for (let i = 0; i < 8; i++) {
+    const label = document.createElement('div');
+    label.className = 'io-label';
+    label.textContent = PLC_OUTPUTS[i];
+    grid.appendChild(label);
+
+    const led = document.createElement('div');
+    led.className = 'io-led';
+    led.id = 'led-' + i;
+    led.textContent = SEGMENT_NAMES[i];
+    grid.appendChild(led);
+  }
+}
+
+// ===== 初始化数字键盘 =====
+function initNumpad() {
+  const pad = document.getElementById('numpad');
+  for (let i = 0; i <= 9; i++) {
+    const btn = document.createElement('button');
+    btn.textContent = i;
+    btn.id = 'num-btn-' + i;
+    btn.onclick = () => {
+      stopLoop();
+      document.getElementById('numInput').value = i;
+      displayNumber();
+    };
+    pad.appendChild(btn);
+  }
+}
+
+// ===== 显示数字 =====
+function displayNumber() {
+  const input = document.getElementById('numInput');
+  let num = parseInt(input.value);
+
+  if (isNaN(num) || num < 0 || num > 9) {
+    clearDisplay();
+    return;
+  }
+
+  const segments = SEGMENT_MAP[num];
+
+  // 更新段码屏
+  for (let i = 0; i < 8; i++) {
+    const segEl = document.getElementById('seg-' + SEGMENT_NAMES[i]);
+    const ledEl = document.getElementById('led-' + i);
+    const btnEl = document.getElementById('num-btn-' + i);
+
+    if (segments[i]) {
+      segEl.classList.add('on');
+      ledEl.classList.add('active');
+    } else {
+      segEl.classList.remove('on');
+      ledEl.classList.remove('active');
+    }
+  }
+
+  // 更新键盘高亮
+  for (let i = 0; i <= 9; i++) {
+    document.getElementById('num-btn-' + i).classList.remove('active-num');
+  }
+  document.getElementById('num-btn-' + num).classList.add('active-num');
+}
+
+// ===== 清除显示 =====
+function clearDisplay() {
+  document.getElementById('numInput').value = '';
+  for (let i = 0; i < 8; i++) {
+    document.getElementById('seg-' + SEGMENT_NAMES[i]).classList.remove('on');
+    document.getElementById('led-' + i).classList.remove('active');
+  }
+  for (let i = 0; i <= 9; i++) {
+    document.getElementById('num-btn-' + i).classList.remove('active-num');
+  }
+}
+
+// ===== 初始化真值表 =====
+function initTruthTable() {
+  const tt = document.getElementById('truthTable');
+
+  // 表头 - 数字
+  const empty = document.createElement('div');
+  empty.className = 'tt-row-label';
+  empty.textContent = '段';
+  tt.appendChild(empty);
+
+  for (let i = 0; i <= 9; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'tt-header';
+    cell.textContent = i;
+    tt.appendChild(cell);
+  }
+
+  // 每一行
+  for (let seg = 0; seg < 8; seg++) {
+    const label = document.createElement('div');
+    label.className = 'tt-row-label';
+    label.textContent = SEGMENT_NAMES[seg];
+    tt.appendChild(label);
+
+    for (let num = 0; num <= 9; num++) {
+      const cell = document.createElement('div');
+      cell.className = 'tt-cell' + (SEGMENT_MAP[num][seg] ? ' on' : '');
+      cell.textContent = SEGMENT_MAP[num][seg];
+      tt.appendChild(cell);
+    }
+  }
+}
+
+// ===== 循环点亮功能 =====
+let loopTimer = null;
+let loopMode = null; // 'seg', 'num', 'flow'
+let loopIndex = 0;
+let loopSpeed = 500; // ms, default speed level 5
+
+// 段码扫描顺序: a → b → c → d → e → f → g → dp
+const SCAN_ORDER = [0, 1, 2, 3, 4, 5, 6, 7]; // a,b,c,d,e,f,g,dp
+
+// 流水灯花样（多种点亮组合）
+const FLOW_PATTERNS = [
+  [1,0,0,0,0,0,0,0], // a
+  [1,1,0,0,0,0,0,0], // a+b
+  [1,1,1,0,0,0,0,0], // a+b+c
+  [1,1,1,1,0,0,0,0], // a+b+c+d
+  [1,1,1,1,1,0,0,0], // a+b+c+d+e
+  [1,1,1,1,1,1,0,0], // a+b+c+d+e+f
+  [1,1,1,1,1,1,1,0], // a+b+c+d+e+f+g
+  [1,1,1,1,1,1,1,1], // all
+  [0,1,1,1,1,1,1,1], // b+c+d+e+f+g+dp
+  [0,0,1,1,1,1,1,1], // c+d+e+f+g+dp
+  [0,0,0,1,1,1,1,1], // d+e+f+g+dp
+  [0,0,0,0,1,1,1,1], // e+f+g+dp
+  [0,0,0,0,0,1,1,1], // f+g+dp
+  [0,0,0,0,0,0,1,1], // g+dp
+  [0,0,0,0,0,0,0,1], // dp
+];
+
+function updateSpeed() {
+  const slider = document.getElementById('speedRange');
+  const val = parseInt(slider.value);
+  document.getElementById('speedVal').textContent = val;
+  // 速度 1~10 映射为间隔 1000ms ~ 100ms
+  loopSpeed = 1100 - val * 100;
+  // 如果正在循环，重启 timer 以应用新速度
+  if (loopTimer) {
+    stopLoop();
+    startLoop(loopMode);
+  }
+}
+
+function stopLoop() {
+  if (loopTimer) {
+    clearInterval(loopTimer);
+    loopTimer = null;
+  }
+  loopMode = null;
+  // 恢复所有按钮状态
+  document.getElementById('loopSegBtn').classList.remove('active');
+  document.getElementById('loopNumBtn').classList.remove('active');
+  document.getElementById('loopFlowBtn').classList.remove('active');
+}
+
+function startLoop(mode) {
+  loopMode = mode;
+  loopIndex = 0;
+
+  if (mode === 'seg') {
+    // 段码扫描：逐段点亮，同时亮起
+    loopTimer = setInterval(() => {
+      // 每次点亮一个段
+      for (let i = 0; i < 8; i++) {
+        const segEl = document.getElementById('seg-' + SEGMENT_NAMES[i]);
+        const ledEl = document.getElementById('led-' + i);
+        if (i === loopIndex) {
+          segEl.classList.add('on');
+          ledEl.classList.add('active');
+        } else {
+          segEl.classList.remove('on');
+          ledEl.classList.remove('active');
+        }
+      }
+      loopIndex = (loopIndex + 1) % 8;
+    }, loopSpeed);
+
+  } else if (mode === 'num') {
+    // 数字轮播：0~9 依次显示
+    loopTimer = setInterval(() => {
+      document.getElementById('numInput').value = loopIndex;
+      displayNumber();
+      loopIndex = (loopIndex + 1) % 10;
+    }, loopSpeed);
+
+  } else if (mode === 'flow') {
+    // 流水灯：花样扫描
+    loopTimer = setInterval(() => {
+      const pattern = FLOW_PATTERNS[loopIndex];
+      for (let i = 0; i < 8; i++) {
+        const segEl = document.getElementById('seg-' + SEGMENT_NAMES[i]);
+        const ledEl = document.getElementById('led-' + i);
+        if (pattern[i]) {
+          segEl.classList.add('on');
+          ledEl.classList.add('active');
+        } else {
+          segEl.classList.remove('on');
+          ledEl.classList.remove('active');
+        }
+      }
+      loopIndex = (loopIndex + 1) % FLOW_PATTERNS.length;
+    }, loopSpeed);
+  }
+}
+
+function toggleSegScan() {
+  const btn = document.getElementById('loopSegBtn');
+  if (loopMode === 'seg') {
+    stopLoop();
+  } else {
+    stopLoop();
+    btn.classList.add('active');
+    startLoop('seg');
+  }
+}
+
+function toggleNumCycle() {
+  const btn = document.getElementById('loopNumBtn');
+  if (loopMode === 'num') {
+    stopLoop();
+  } else {
+    stopLoop();
+    btn.classList.add('active');
+    startLoop('num');
+  }
+}
+
+function toggleFlowLight() {
+  const btn = document.getElementById('loopFlowBtn');
+  if (loopMode === 'flow') {
+    stopLoop();
+  } else {
+    stopLoop();
+    btn.classList.add('active');
+    startLoop('flow');
+  }
+}
+
+// ===== 回车键支持 =====
+document.getElementById('numInput').addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') {
+    stopLoop();
+    displayNumber();
+  }
+});
+
+// ===== 初始化 =====
+initIOPanel();
+initNumpad();
+initTruthTable();
+displayNumber(); // 默认显示 0
+</script>
+
+</body>
+</html>
